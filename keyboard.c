@@ -7,13 +7,23 @@ const uint32_t row_pins = 0b00000000000000000000000000111110;
 const uint32_t col_pins = 0b00000000000000000011111111000000;
 #define LED_PIN 25
 
-// keycodes: pico-sdk/lib/tinyusb/src/class/hid/hid.h
-const uint8_t keymap[5][8] = {
-  { HID_KEY_NONE, HID_KEY_NONE, HID_KEY_NONE, HID_KEY_NONE, HID_KEY_A, HID_KEY_B, HID_KEY_C, HID_KEY_D },
-  { HID_KEY_E, HID_KEY_F, HID_KEY_G, HID_KEY_H, HID_KEY_I, HID_KEY_J, HID_KEY_K, HID_KEY_L },
-  { HID_KEY_M, HID_KEY_N, HID_KEY_O, HID_KEY_P, HID_KEY_Q, HID_KEY_R, HID_KEY_S, HID_KEY_T },
-  { HID_KEY_U, HID_KEY_V, HID_KEY_W, HID_KEY_X, HID_KEY_Y, HID_KEY_Z, HID_KEY_0, HID_KEY_1 },
-  { HID_KEY_2, HID_KEY_3, HID_KEY_4, HID_KEY_5, HID_KEY_6, HID_KEY_7, HID_KEY_8, HID_KEY_9 }
+// pico-sdk/lib/tinyusb/src/class/hid/hid.h
+uint8_t const conv_table[128][2] =  { HID_ASCII_TO_KEYCODE };
+
+uint8_t const keymap[] = {
+  0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, HID_KEY_KEYPAD_1, HID_KEY_KEYPAD_2, HID_KEY_KEYPAD_3, 0,
+  0, 0, 0, 0, HID_KEY_KEYPAD_4, HID_KEY_KEYPAD_5, HID_KEY_KEYPAD_6, 0,
+  0, 0, 0, 0, HID_KEY_KEYPAD_7, HID_KEY_KEYPAD_8, HID_KEY_KEYPAD_9, HID_KEY_BACKSPACE,
+  0, 0, 0, HID_KEY_NUM_LOCK, HID_KEY_KEYPAD_0, HID_KEY_KEYPAD_DECIMAL, HID_KEY_SPACE, 0
+};
+
+char* const textmap[] = {
+  0, 0, 0, 0, "TIME", "TEST", "BKG", "Home",
+  "MO ASSAY", "Cobalt-57", "Gallium-67", "Technetium-99m", 0, 0, 0, "UTIL",
+  "Iodine-125", "Chromium-51", "Iodine-123", "Iodine-131", 0, 0, 0, "Becquerel",
+  "U2", "U4", "Xenon-133", "NUCL", 0, 0, 0, 0,
+  "U3", "U5", "Thallium-201", 0, 0, 0, 0, "Enter.\n"
 };
 
 static inline void gpio_setup(void){
@@ -47,8 +57,15 @@ uint8_t scan_matrix(){
   while (cols >>= 1) { x++; }
   while (rows >>= 1) { y++; }
 
-  if (x && y) return keymap[y-1][x-1];
+  if (x && y) return (y-1)*8 + (x-1);
   return 0;
+}
+
+void tud_task_wait(uint ms) {
+  while (ms--) {
+    tud_task();
+    sleep_ms(1);
+  }
 }
 
 void send_key(uint8_t key){
@@ -59,10 +76,24 @@ void send_key(uint8_t key){
   tud_hid_keyboard_report(1, 0, keycode);
 }
 
-void tud_task_wait(uint ms) {
-  while (ms--) {
-    tud_task();
-    sleep_ms(1);
+void send_ascii(char chr){
+  if ( !tud_hid_ready() ) return;
+
+  uint8_t keycode[6] = { 0 };
+  uint8_t modifier   = 0;
+  if ( conv_table[chr][0] ) modifier = KEYBOARD_MODIFIER_LEFTSHIFT;
+  keycode[0] = conv_table[chr][1];
+  tud_hid_keyboard_report(1, modifier, keycode);
+}
+
+void type(char* text) {
+  char c;
+  while (c = *text++) {
+    send_ascii(c);
+
+    tud_task_wait(10);
+    send_key(0);
+    tud_task_wait(10);
   }
 }
 
@@ -83,20 +114,14 @@ void main(){
       uint8_t debounce = scan_matrix();
 
       if (key==debounce) {
-        send_key(key);
+        if (textmap[key]) type(textmap[key]);
+        else send_key(keymap[key]);
+
         lastkey=key;
       }
     }
   }
 
-}
-
-// Invoked when sent REPORT successfully to host
-// Application can use this to send the next report
-// Note: For composite reports, report[0] is report ID
-void tud_hid_report_complete_cb(uint8_t instance, uint8_t const* report, uint8_t len)
-{
-  //send_hid_report( ... );
 }
 
 // Invoked when received GET_REPORT control request
